@@ -5,28 +5,31 @@ import matplotlib.pyplot as plt
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Partner Audit Dashboard", layout="wide")
 
-# Replace with your actual Google Sheet ID
-# (Found in your sheet URL: https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE/edit)
-SHEET_ID = "YOUR_GOOGLE_SHEET_ID_HERE"
+st.title("Partner Audit & Performance Dashboard")
 
-# --- DATA LOADERS ---
-@st.cache_data(ttl=600)
-def load_data():
-    audits_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Weekly_Audits"
-    df_audits = pd.read_csv(audits_url)
-    
-    users_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Users"
-    df_users = pd.read_csv(users_url)
-    
-    return df_audits, df_users
+# --- SIDEBAR FILE UPLOADERS ---
+st.sidebar.header("📁 Load Data")
+audit_file = st.sidebar.file_uploader("Upload Weekly Audits CSV", type=["csv"])
+user_file = st.sidebar.file_uploader("Upload Users Credentials CSV", type=["csv"])
 
-try:
-    df_audits, df_users = load_data()
-except Exception as e:
-    st.error("Error loading data from Google Sheets. Check your Sheet ID and sharing permissions.")
+if not audit_file or not user_file:
+    st.info("👈 Please upload both **Weekly Audits CSV** and **Users CSV** in the sidebar to view metrics.")
     st.stop()
 
-# --- SESSION STATE FOR LOGIN ---
+# --- LOAD CSV DATA ---
+@st.cache_data
+def parse_uploaded_files(a_file, u_file):
+    df_a = pd.read_csv(a_file)
+    df_u = pd.read_csv(u_file)
+    return df_a, df_u
+
+try:
+    df_audits, df_users = parse_uploaded_files(audit_file, user_file)
+except Exception as e:
+    st.error(f"Error parsing uploaded files: {e}")
+    st.stop()
+
+# --- SESSION STATE AUTHENTICATION ---
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
     st.session_state["user_role"] = None
@@ -34,7 +37,7 @@ if "logged_in" not in st.session_state:
 
 # --- LOGIN SCREEN ---
 if not st.session_state["logged_in"]:
-    st.title("Partner Dashboard Login")
+    st.subheader("Partner Portal Login")
     
     with st.form("login_form"):
         email = st.text_input("Email Address")
@@ -42,7 +45,7 @@ if not st.session_state["logged_in"]:
         submit = st.form_submit_button("Sign In")
         
         if submit:
-            user_match = df_users[df_users["Email"].str.lower() == email.strip().lower()]
+            user_match = df_users[df_users["Email"].astype(str).str.lower() == email.strip().lower()]
             
             if not user_match.empty and str(user_match.iloc[0]["Password_Hash"]) == password.strip():
                 st.session_state["logged_in"] = True
@@ -52,12 +55,12 @@ if not st.session_state["logged_in"]:
             else:
                 st.error("Invalid Email or Password")
 
-# --- MAIN DASHBOARD ---
+# --- MAIN DASHBOARD VIEW ---
 else:
     user_role = st.session_state["user_role"]
     user_branch = st.session_state["user_branch"]
     
-    st.sidebar.title("Navigation")
+    st.sidebar.markdown("---")
     st.sidebar.write(f"Logged in as: **{user_role}**")
     
     if st.sidebar.button("Logout"):
@@ -66,21 +69,21 @@ else:
         
     # --- ROW-LEVEL SECURITY FILTERING ---
     if user_role == "Admin":
-        all_branches = ["ALL"] + sorted(df_audits["Branch"].dropna().unique().tolist())
+        all_branches = ["ALL"] + sorted(df_audits["Branch"].dropna().astype(str).unique().tolist())
         selected_branch = st.sidebar.selectbox("Select Branch Filter", all_branches)
     else:
         selected_branch = user_branch
         st.sidebar.info(f"Filtered for Branch: **{selected_branch}**")
 
+    # Apply RLS Filter
     if selected_branch == "ALL":
         filtered_df = df_audits
     else:
-        filtered_df = df_audits[df_audits["Branch"] == selected_branch]
+        filtered_df = df_audits[df_audits["Branch"].astype(str) == selected_branch]
 
-    st.title("Partner Audit & Performance Dashboard")
     st.subheader(f"Viewing metrics for: {selected_branch}")
     
-    # --- KPI METRICS ---
+    # --- KPI CARDS ---
     col1, col2, col3 = st.columns(3)
     
     total_audits = len(filtered_df)
@@ -95,7 +98,7 @@ else:
     
     st.markdown("---")
     
-    # --- VISUALIZATION ---
+    # --- CHART ---
     st.subheader("Breaches by Product Category")
     if not filtered_df.empty:
         cat_counts = filtered_df["Product Sub Category"].value_counts().head(10)
